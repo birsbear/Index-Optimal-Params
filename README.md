@@ -1,4 +1,4 @@
-# Index-Optimal-Params-
+# Index-Optimal-Params
 # 專案簡介
 
 對接幣安API，抓取所有USDT對的30m/1h/2h/4h/12h/1d K線，存入資料庫中，實現不同的指標並回測一定範圍內所有可變動參數，輸出其結果進行最佳參數評估
