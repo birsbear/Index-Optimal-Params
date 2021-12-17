@@ -76,3 +76,6 @@ GUI版本
     - 建立幣價資料庫
     - 建立指標資料庫（日後不重複計算
     - 判斷資料庫是否最新資料
+
+# 功能架構圖
+![Functional architecture diagram](https://github.com/birsbear/Index-Optimal-Params/blob/main/Index-Optimal-Params.png)
