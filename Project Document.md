@@ -86,4 +86,4 @@ CLI版本已完成，GUI版本新增移動止損回測正在開發中
     - 判斷資料庫是否最新資料
 
 # 功能架構圖
-![Functional architecture diagram](https://github.com/birsbear/Index-Optimal-Params/blob/main/Index-Optimal-Params.png)
+![Functional architecture diagram](https://github.com/birsbear/Index-Optimal-Params/blob/main/image/Index-Optimal-Params.png)
