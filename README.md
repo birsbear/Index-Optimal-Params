@@ -15,4 +15,4 @@ CLI版本已完成，GUI版本新增移動止損回測正在開發中
 
 選擇幣種時可選擇輸入 BTC ETH
 
-![demo](https://github.com/birsbear/Index-Optimal-Params/blob/main/SuperTrend.png)
+![demo](https://github.com/birsbear/Index-Optimal-Params/blob/main/image/SuperTrend.png)
