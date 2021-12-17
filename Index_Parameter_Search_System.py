@@ -925,6 +925,7 @@ class Cryptocurrency:
         
 
 def update_k_lines_db(cyptor_list, db):
+    cyptor_list = ['BTCUSDT','ETHUSDT']
     cyptor_numel = len(cyptor_list)
     for ind,symbol in enumerate(cyptor_list):
         print("\rUpdate {} K Line.....{}/{}".format(symbol, ind+1, cyptor_numel), end='')
@@ -1344,7 +1345,10 @@ if __name__ == "__main__":
             elif system_options == 'calcul index':
                 system_options = '0'
                 print('\n指數 {}, K線 {}\n'.format(index_name, k_line_type))
-                symbol = input("請輸入想要計算的幣別並依','當間隔，若想全測則輸入all : \n")
+                symbol = input("請輸入想要計算的幣別並依','當間隔，若想全測則輸入all 回主選單請輸入(0) : \n")
+                if symbol == '0':
+                    system_options = '0'
+                    continue
                 if symbol.replace(' ','').lower() == 'all':
                     symbol_list = cyptor_list
                 elif symbol.replace(' ','') == '':
