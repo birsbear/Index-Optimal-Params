@@ -46,7 +46,7 @@ class DBsystem:
 
 
 class Order:
-    def __init__(self, symbol="BTCUSDT", amount=0, open_price=0,order_type='Long', close_price = 0, order_date='', load_order = False, order_str = ''):
+    def __init__(self, symbol="BTCUSDT", amount=0, open_price=0,order_type='Long', close_price=0, order_date='', load_order=False, order_str='', stop_loss=None, take_profit=None):
         if load_order:
             self.load_json(order_str)
         else:
@@ -62,6 +62,9 @@ class Order:
             self.max_drawdown = 0
             self.max_profit_time = ''
             self.max_drawdown_time = ''
+            self.stop_loss = stop_loss
+            self.take_profit = take_profit
+
     def close(self, close_price):
         self.close_price = close_price
         if self.type == 'Long':
@@ -114,15 +117,24 @@ class Order:
         if self.type == 'Long':
             profit = (high-self.open_price)/self.open_price if high != self.open_price else 0
             drawdown = (self.open_price-low)/self.open_price if high != self.open_price else 0
+            if high >= self.take_profit and self.take_profit != None:
+                self.close(self.take_profit)
+            elif low <= self.stop_loss and self.stop_loss != None:
+                self.close(self.stop_loss)
         elif self.type == 'Short':
             profit = (self.open_price-low)/self.open_price if high != self.open_price else 0
             drawdown = (high-self.open_price)/self.open_price if high != self.open_price else 0
+            if high >= self.stop_loss and self.stop_loss != None:
+                self.close(self.stop_loss)
+            elif low <= self.take_profit and self.take_profit != None:
+                self.close(self.take_profit)
         if  profit > self.max_profit:
             self.max_profit = profit
             self.max_profit_time = str(datetime.fromisoformat(date)+timedelta(hours = 8))
         if drawdown > self.max_drawdown:
             self.max_drawdown = drawdown
             self.max_drawdown_time = str(datetime.fromisoformat(date)+timedelta(hours = 8))
+        
         
 class Wallet:
     def __init__(self):
@@ -275,7 +287,7 @@ class Cryptocurrency:
         self.db_k_lines[k_line_type] = pd.read_sql("SELECT * FROM {}".format(table), self.db.con)
         
     def check_strategy_db(self, k_line_type, strategy_name):
-        table = f'_{self.symbol}_{kline_type}_{strategy}' 
+        table = f'_{self.symbol}_{k_line_type}_{strategy}' 
         feedback = self.db.check(table)
         if feedback == 0:
             if strategy_name == 'SuperTrend':
@@ -424,7 +436,146 @@ class Cryptocurrency:
                 p_array[ind,0] = t_
         new_n = np.c_[new_n, p_array]
         return new_n
-    
+
+    def superTrend_backtest(self, k_line_type, parameter, is_save):
+        source, period, factor = parameter
+        data_table = '_' + self.symbol+ '_' + k_line_type 
+        strategy_table = data_table + '_SuperTrend'
+        df = self.db_k_lines[k_line_type]
+        n_array = df[['OpenTime', 'High', 'Low', 'Open', 'Close']].to_numpy()
+        hl, hc, cl = n_array[1:,1]-n_array[1:,2] , abs(n_array[1:,1]-n_array[:-1,4]), abs(n_array[1:,2]-n_array[:-1,4])
+        tr = np.insert(np.max([hl,hc,cl], axis=0),0,n_array[0,1]-n_array[0,2])
+        if source == 'close':
+            src = n_array[:,4]
+        elif source == "hl2":
+            src = (n_array[:,1]+n_array[:,2])/2
+        elif source == "hlc3":
+            src = (n_array[:,1]+n_array[:,2]+n_array[:,4])/3
+        elif source == "ohlc4":
+            src = (n_array[:,1]+n_array[:,2]+n_array[:,3]+n_array[:,4])/4
+        trend, p1atr, p1up, p1down = np.ones((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],))
+        new_n = np.c_[n_array,tr,src]
+        p_array = np.c_[trend,p1atr,p1up,p1down,p1down].astype(object)
+
+
+        total_highest_list = []
+        total_lowest_list = []
+        current_highest = [0]*99
+        current_lowest = [999999]*99
+        for _,_,high,low,_ in n_array:
+            high *= 1.001
+            low *= 0.999
+            for index in range(99):
+                if high > current_highest[index]:
+                    current_highest[index] = high
+                else:
+                    break
+            current_highest.insert(0, high)
+            total_highest_list.append(current_highest)
+            current_highest = current_highest[:-1]
+            for index in range(99):
+                if low < current_lowest[index]:
+                    current_lowest[index] = low
+                else:
+                    break
+            current_lowest.insert(0,low)
+            total_lowest_list.append(current_lowest)
+            current_lowest = current_lowest[:-1]
+
+
+        wallet_list = np.array([[Wallet()]*100]*100)
+        buy_order_status, sell_order_status = np.zeros(wallet_list.shape), np.zeros(wallet_list.shape)
+
+
+
+        for ind, row in enumerate(new_n):
+            if ind >= period:
+                last_row = new_n[ind-1]
+                if ind == period:
+                    atr = new_n[ind-period+1 : ind+1,5].sum()/period
+                else:
+                    alpha = 1/period
+                    atr = row[5]*alpha + (1-alpha)*p_array[ind-1,1]
+                p_array[ind,1] = atr
+                up = row[6] - factor*atr
+                up1 = p_array[ind-1,2]
+                up = max(up,up1) if last_row[4] > up1 else up
+                p_array[ind,2] = up
+                
+                down = row[6] + factor*atr
+                down1 = p_array[ind-1,3]
+                down = min(down,down1) if last_row[4] < down1 else down
+                p_array[ind,3] = down
+                
+                t_ = p_array[ind-1,0]
+                if (t_ == -1) & (row[4] > down1):
+                    t_ = 1
+                elif (t_ == 1) & (row[4] < up1):
+                    t_ = -1
+                p_array[ind,0] = t_
+
+                # price = float(row[3])
+                
+                # buy_order = np.where(buy_singal == 1)
+                # for b in buy_order[0]:
+                #     wallet = wallet_list[b]
+                #     if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
+                #         wallet.order_list[0].close(price)
+                #         profit = wallet.order_list[0].profit
+                #         wallet.money += profit
+                #         history_order = wallet.order_list.pop()
+                        
+                #         if profit >= 0:
+                #             wallet.short_win += profit
+                #             wallet.short_wcount += 1
+                #         else:
+                #             wallet.short_lose += profit
+                #             wallet.short_lcount += 1
+                        
+                #         wallet.order_history.append(history_order)
+                #         wallet.wallet_update()
+                    
+                #         # p_array[ind,4][b] = history_order.save_json()
+                #     amount = wallet.one_oder_money / price
+                #     wallet.order_list.append(Order(self.symbol, amount, price, "Long", order_date = row[0]))
+                # sell_order = np.where(sell_singal == 1)
+                # for s in sell_order[0]:
+                #     wallet = wallet_list[s]
+                #     if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
+                #         wallet.order_list[0].close(price)
+                #         profit = wallet.order_list[0].profit
+                #         wallet.money += profit
+                #         history_order = wallet.order_list.pop()
+                        
+                #         if profit >= 0:
+                #             wallet.long_win += profit
+                #             wallet.long_wcount += 1
+                #         else:
+                #             wallet.long_lose += profit
+                #             wallet.long_lcount += 1
+                        
+                #         wallet.order_history.append(history_order)
+                #         wallet.wallet_update()
+                    
+                #         # p_array[ind,4][s] = history_order.save_json()
+                #     amount = wallet.one_oder_money / price
+                #     wallet.order_list.append(Order(self.symbol, amount, price, "Short", order_date = row[0]))
+                
+                # for w_ in wallet_list:
+                #     w_.order_update(row[1], row[2], row[0])
+                # buy_singal, sell_singal = np.zeros(t_.shape), np.zeros(t_.shape)
+                
+                
+                
+                
+                
+                # buy_ = np.where(((p_array[ind-1,0]+p_array[ind,0]) == 0 )& (p_array[ind,0]==1))
+                # sell_ = np.where(((p_array[ind-1,0]+p_array[ind,0]) == 0 )& (p_array[ind,0]==-1))
+                # buy_singal[buy_], sell_singal[sell_] = 1, 1
+        new_n = np.c_[new_n, p_array]
+        return new_n
+
+        pass
     def SuperTrend_Parameter(self,k_line_type,is_save):
         data_table = '_' + self.symbol+ '_' + k_line_type 
         strategy_table = data_table + '_SuperTrend'
@@ -450,6 +601,7 @@ class Cryptocurrency:
         source = ["close", "hl2", "hlc3", "ohlc4"]
         factor = np.arange(0.1,10.1,0.1)
         factor_size = factor.shape[0]
+        
         
         for period in range(1,8):
             for src in range(4):
@@ -624,6 +776,24 @@ class Cryptocurrency:
         p1atr, up_s1, down_s1, up_s2, down_s2, up_s3, down_s3, up_s4, down_s4 =np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],)),np.zeros((n_array.shape[0],))
         new_n = np.c_[n_array,tr,src1,src2,src3,src4]
         
+        total_highest_list = []
+        total_lowest_list = []
+        current_highest = [0]*100
+        current_lowest = [999999]*100
+        for _,_,high,low,_ in n_array:
+            for index in range(100):
+                if high > current_highest[index]:
+                    current_highest[index] = high
+                else:
+                    break
+            total_highest_list.append(current_highest)
+            for index in range(100):
+                if low < current_lowest[index]:
+                    current_lowest[index] = low
+                else:
+                    break
+            total_lowest_list.append(current_lowest)
+
         result = {"Source":[],"Param":[],
                   "RTP_LS":[], "RTP_L":[], "RTP_S":[], 
                   "ProfitFactor_LS":[], "ProfitFactor_L":[], "ProfitFactor_S":[], 
@@ -745,7 +915,8 @@ class Cryptocurrency:
                             
             new_n = np.c_[new_n, p_array]
         return new_n
-    
+    def KDJ_backtest(self, k_line_type, parameter, is_save):
+        pass
     def KDJ_Parameter(self, k_line_type,is_save):
         data_table = '_' + self.symbol+ '_' + k_line_type 
         strategy_table = data_table + '_KDJ'
@@ -958,6 +1129,19 @@ def parameter_search(symbol_list, index_name, k_line_type, is_save, db):
             coin.KDJ_Parameter(k_line_type,is_save)
     print("\nParameter Search Finish")
         
+def backtest_parameter_search(symbol_list, index_name, k_line_type, parameter, is_save, db):
+    
+    for symbol in symbol_list:
+        table = '_'+symbol+'_'+k_line_type+'_'+index_name
+        coin = Cryptocurrency('_'+symbol, db)
+        coin.check_db(k_line_type)
+        # coin.update_k_lines(k_line_type)
+        print("\rSymbol:{:>10s}, Index : {}, K Line : {}, Parameter Searching ".format(index_name, k_line_type, symbol), end='')
+        if index_name == "SuperTrend":
+            coin.superTrend_backtest(k_line_type,parameter,is_save)
+        elif index_name == "KDJ":
+            coin.KDJ_backtest(k_line_type,parameter,is_save)
+    print("\nParameter Search Finish")
 
 def press_exit():
     
@@ -988,83 +1172,83 @@ def check_backtest_folder():
         if not os.path.isdir(f'./BackTest/{strategy}/30m'):
             os.mkdir(f'./BackTest/{strategy}/30m')
     
-# def kdj_one(df, ilong = 41, isig = 31):
-#     n = df[['Open','High','Low','Close']].to_numpy()
-#     c = n[:,3]
+def kdj_one(df, ilong = 41, isig = 31):
+    n = df[['Open','High','Low','Close']].to_numpy()
+    c = n[:,3]
     
-#     h = np.zeros(n[:,1].shape)
-#     for ind, i in enumerate(n[:,1]):
-#         h[ind] = np.max(n[ind-ilong+1:ind+1,1]) if ind > ilong else np.max(n[:ind+1,1])
-#     l = np.zeros(n[:,2].shape)
-#     for ind, i in enumerate(n[:,2]):
-#         l[ind] = np.min(n[ind-ilong+1:ind+1,2]) if ind > ilong else np.min(n[:ind+1,2])
+    h = np.zeros(n[:,1].shape)
+    for ind, i in enumerate(n[:,1]):
+        h[ind] = np.max(n[ind-ilong+1:ind+1,1]) if ind > ilong else np.max(n[:ind+1,1])
+    l = np.zeros(n[:,2].shape)
+    for ind, i in enumerate(n[:,2]):
+        l[ind] = np.min(n[ind-ilong+1:ind+1,2]) if ind > ilong else np.min(n[:ind+1,2])
     
-#     rsv = 100*((c-l)/(h-l))
+    rsv = 100*((c-l)/(h-l))
     
     
-#     pk = bcwsma_(rsv, isig)
-#     pd = bcwsma_(pk, isig)
+    pk = bcwsma_(rsv, isig)
+    pd = bcwsma_(pk, isig)
     
-#     pj = 3*pk-2*pd
+    pj = 3*pk-2*pd
     
-#     trend = np.ones(pj.shape)
-#     buy_singal, sell_singal = 0, 0
-#     wallet = Wallet()
-#     for ind in range(1,len(pj)):
-#         price = n[ind,0]
-#         if buy_singal == 1:
-#             if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
-#                 wallet.order_list[0].close(price)
-#                 profit = wallet.order_list[0].profit
-#                 wallet.money += profit
-#                 history_order = wallet.order_list.pop()
+    trend = np.ones(pj.shape)
+    buy_singal, sell_singal = 0, 0
+    wallet = Wallet()
+    for ind in range(1,len(pj)):
+        price = n[ind,0]
+        if buy_singal == 1:
+            if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
+                wallet.order_list[0].close(price)
+                profit = wallet.order_list[0].profit
+                wallet.money += profit
+                history_order = wallet.order_list.pop()
                 
-#                 if profit >= 0:
-#                     wallet.short_win += profit
-#                     wallet.short_wcount += 1
-#                 else:
-#                     wallet.short_lose += profit
-#                     wallet.short_lcount += 1
+                if profit >= 0:
+                    wallet.short_win += profit
+                    wallet.short_wcount += 1
+                else:
+                    wallet.short_lose += profit
+                    wallet.short_lcount += 1
                 
-#                 wallet.order_history.append(history_order)
+                wallet.order_history.append(history_order)
             
-#             amount = wallet.one_oder_money / price
-#             wallet.order_list.append(Order('errortest', amount, price, 'Long'))
-#             buy_singal = 0
+            amount = wallet.one_oder_money / price
+            wallet.order_list.append(Order('errortest', amount, price, 'Long'))
+            buy_singal = 0
             
-#         elif sell_singal == 1:
-#             if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
-#                 wallet.order_list[0].close(price)
-#                 profit = wallet.order_list[0].profit
-#                 wallet.money += profit
-#                 history_order = wallet.order_list.pop()
+        elif sell_singal == 1:
+            if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
+                wallet.order_list[0].close(price)
+                profit = wallet.order_list[0].profit
+                wallet.money += profit
+                history_order = wallet.order_list.pop()
                 
-#                 if profit >= 0:
-#                     wallet.long_win += profit
-#                     wallet.long_wcount += 1
-#                 else:
-#                     wallet.long_lose += profit
-#                     wallet.long_lcount += 1
+                if profit >= 0:
+                    wallet.long_win += profit
+                    wallet.long_wcount += 1
+                else:
+                    wallet.long_lose += profit
+                    wallet.long_lcount += 1
                 
-#                 wallet.order_history.append(history_order)
+                wallet.order_history.append(history_order)
                 
-#             amount = wallet.one_oder_money / price
-#             wallet.order_list.append(Order('errortest', amount, price, "Short"))
-#             sell_singal = 0
+            amount = wallet.one_oder_money / price
+            wallet.order_list.append(Order('errortest', amount, price, "Short"))
+            sell_singal = 0
             
-#         if pj[ind] >pd[ind]:
-#             trend[ind] = 1
-#         elif pj[ind] < pd[ind]:
-#             trend[ind] = -1
-#         else:
-#             trend[ind] == trend[ind-1]
-#         if trend[ind-1] + trend[ind] == 0:
-#             if trend[ind] == 1:
-#                 buy_singal = 1
-#             else:
-#                 sell_singal = 1
+        if pj[ind] >pd[ind]:
+            trend[ind] = 1
+        elif pj[ind] < pd[ind]:
+            trend[ind] = -1
+        else:
+            trend[ind] == trend[ind-1]
+        if trend[ind-1] + trend[ind] == 0:
+            if trend[ind] == 1:
+                buy_singal = 1
+            else:
+                sell_singal = 1
     
-#     return wallet
+    return wallet
     
     
     
@@ -1238,16 +1422,16 @@ def kdj_all(df):
     
     return strategy_reback_result, wallet_
     
-# def bcwsma_(array, isig, m = 1):
-#     bcwsma = np.zeros(array.shape)
-#     p1 = array*m
-#     p2 = isig-m
+def bcwsma_(array, isig, m = 1):
+    bcwsma = np.zeros(array.shape)
+    p1 = array*m
+    p2 = isig-m
     
-#     for ind in range(len(bcwsma)):
-#         p3 = bcwsma[ind-1] if ind > 0 else 0
-#         bcwsma[ind] = (p1[ind]+p2*p3)/isig
+    for ind in range(len(bcwsma)):
+        p3 = bcwsma[ind-1] if ind > 0 else 0
+        bcwsma[ind] = (p1[ind]+p2*p3)/isig
         
-#     return bcwsma
+    return bcwsma
     
     
     
@@ -1287,7 +1471,7 @@ if __name__ == "__main__":
         
         while system_options != 'e':
             if system_options == '0':
-                system_options = input("選擇目的 (1)更新K線資料 (2)指標參數搜尋 (e)離開程式 : ")
+                system_options = input("選擇目的 (1)更新K線資料 (2)指標參數搜尋 (3)止損止盈參數搜尋 (e)離開程式 : ")
             elif system_options == '1':
                 update_k_lines_db(cyptor_list, db)
                 print("\nK線更新完畢.... \n")
@@ -1311,6 +1495,7 @@ if __name__ == "__main__":
                         break
                     else:
                         print('\n輸入錯誤請重新選擇 \n')
+
             elif system_options == 'choice kline':
                 system_options = '0'
                 while True:
@@ -1341,6 +1526,37 @@ if __name__ == "__main__":
                         print("\nk線選擇錯誤 \n")
                         continue
                     break
+                
+            elif system_options == 'choice backtest kline':
+                system_options = '0'
+                while True:
+                    k_type = input("請選擇K線 (1)1d (2)12h (3)4h (4)2h (5)1h (6)30m (0)回主選單 (e)離開程式 : ")
+                    if k_type == '1':
+                        k_line_type = '1d'
+                        system_options = "calcul backtest"
+                    elif k_type == '2':
+                        k_line_type = '12h'
+                        system_options = "calcul backtest"
+                    elif k_type == '3':
+                        k_line_type = '4h'
+                        system_options = "calcul backtest"
+                    elif k_type == '4':
+                        k_line_type = '2h'
+                        system_options = "calcul backtest"
+                    elif k_type == '5':
+                        k_line_type = '1h'
+                        system_options = "calcul backtest"
+                    elif k_type == '6':
+                        k_line_type = '30m'
+                        system_options = "calcul backtest"
+                    elif k_type == '0':
+                        break
+                    elif k_type == 'e':
+                        system_options = 'e'
+                    else:
+                        print("\nk線選擇錯誤 \n")
+                        continue
+                    break
             #     if index_numel
             elif system_options == 'calcul index':
                 system_options = '0'
@@ -1362,6 +1578,60 @@ if __name__ == "__main__":
                     is_save = 1
                 parameter_search(symbol_list, index_name, k_line_type, is_save, db)
                 # print(symbol_list, index_name, k_line_type, is_save)
+                
+            elif system_options == '3':
+                system_options = "0"
+                while True:
+                    index_numel = input("選擇指標 (1) SuperTrend (2) KDJ (0)回主選單 (e)離開程式 : ")
+                    if index_numel == '1':
+                        index_name = 'SuperTrend'
+                        system_options = 'key parameter'
+                        break
+                    elif index_numel == '2':
+                        index_name = 'KDJ'
+                        system_options = 'key parameter'
+                        break
+                    elif index_numel == '0':
+                        break
+                    elif index_numel == 'e':
+                        system_options = 'e'
+                        break
+                    else:
+                        print('\n輸入錯誤請重新選擇 \n')
+            elif system_options == 'key parameter':
+                system_options = "0"
+                if index_name == "SuperTrend":
+                    source = input(f"請輸入參數source : ")
+                    period = int(input(f"請輸入參數period : "))
+                    factor = int(input(f"請輸入參數factor : "))
+                    parameter = [source, period, factor]
+                    pass
+                elif index_name == "KDJ":
+                    ilong = int(input(f"請輸入參數ilong : "))
+                    isig = int(input(f"請輸入參數isig : "))
+                    parameter = [ilong, isig]
+                    pass
+                system_options = 'choice backtest kline'
+            
+            elif system_options == "calcul backtest":
+                system_options = "0"
+                print('\n指數 {}, K線 {}\n'.format(index_name, k_line_type))
+                symbol = input("請輸入想要計算的幣別並依','當間隔，若想全測則輸入all 回主選單請輸入(0) : \n")
+                if symbol == '0':
+                    system_options = '0'
+                    continue
+                if symbol.replace(' ','').lower() == 'all':
+                    symbol_list = cyptor_list
+                elif symbol.replace(' ','') == '':
+                    system_options = 'calcul index'
+                    symbol_list = '幣別不得為空'
+                    continue
+                else:
+                    symbol_list = [i+'USDT' for i in  symbol.replace(' ','').upper().replace('USDT','').split(',')]
+                is_save = int(input("是否輸出結果? (1) Yes (0) No : "))
+                if is_save not in [0,1]:
+                    is_save = 1
+                backtest_parameter_search(symbol_list, index_name, k_line_type, parameter, is_save, db)
                 
             else:
                 system_options = '0'
