@@ -569,9 +569,10 @@ class Cryptocurrency:
                 
                 
                 
-                # buy_ = np.where(((p_array[ind-1,0]+p_array[ind,0]) == 0 )& (p_array[ind,0]==1))
-                # sell_ = np.where(((p_array[ind-1,0]+p_array[ind,0]) == 0 )& (p_array[ind,0]==-1))
-                # buy_singal[buy_], sell_singal[sell_] = 1, 1
+                buy_ = np.where(((p_array[ind-1,0]+p_array[ind,0]) == 0 )& (p_array[ind,0]==1))
+                sell_ = np.where(((p_array[ind-1,0]+p_array[ind,0]) == 0 )& (p_array[ind,0]==-1))
+                buy_order_status[buy_], sell_order_status[sell_] = 1, 1
+                
         new_n = np.c_[new_n, p_array]
         return new_n
 
