@@ -1604,7 +1604,7 @@ if __name__ == "__main__":
                 if index_name == "SuperTrend":
                     source = input(f"請輸入參數source : ")
                     period = int(input(f"請輸入參數period : "))
-                    factor = int(input(f"請輸入參數factor : "))
+                    factor = float(input(f"請輸入參數factor : "))
                     parameter = [source, period, factor]
                     pass
                 elif index_name == "KDJ":
