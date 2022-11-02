@@ -462,7 +462,9 @@ class Cryptocurrency:
         total_lowest_list = []
         current_highest = [0]*99
         current_lowest = [999999]*99
-        for _,_,high,low,_ in n_array:
+        for index, (_,_,high,low,_) in enumerate(n_array):
+            if index == 0:
+                continue
             high *= 1.001
             low *= 0.999
             for index in range(99):
@@ -482,9 +484,12 @@ class Cryptocurrency:
             total_lowest_list.append(current_lowest)
             current_lowest = current_lowest[:-1]
 
-
-        wallet_list = np.array([[Wallet()]*100]*100)
+        total_highest_list = np.array(total_highest_list)
+        total_lowest_list = np.array(total_lowest_list)
+        wallet_list = np.array([[Wallet()]*100]*1000) #K線數量1-100 * 損益比0.1~100
         buy_order_status, sell_order_status = np.zeros(wallet_list.shape), np.zeros(wallet_list.shape)
+
+        
 
 
 
@@ -514,56 +519,84 @@ class Cryptocurrency:
                     t_ = -1
                 p_array[ind,0] = t_
 
-                # price = float(row[3])
-                
-                # buy_order = np.where(buy_singal == 1)
-                # for b in buy_order[0]:
-                #     wallet = wallet_list[b]
-                #     if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
-                #         wallet.order_list[0].close(price)
-                #         profit = wallet.order_list[0].profit
-                #         wallet.money += profit
-                #         history_order = wallet.order_list.pop()
+                price = float(row[3])
+                buy_signal, sell_signal = 0, 0
+                if p_array[ind-1:ind+1,0].sum() == 0 and p_array[ind,0] == 1:
+                    buy_signal = 1  
+                if p_array[ind-1:ind+1,0].sum() == 0 and p_array[ind,0] == -1:
+                    sell_signal = 1  
+
+                for profit_stop_rate in np.arange(0.1,100.1,0.1):
+                    for k_count in np.arange(1,101,1):
+                        _wallet = wallet_list[profit_stop_rate][k_count]
+                        if buy_signal:
+                            if _wallet.order_list != [] and _wallet.order_list[0].type == "Short":
+                                _wallet.order_list[0].close(price)
+                                profit = _wallet.order_list[0].profit
+                                _wallet.money += profit
+                                history_order = _wallet.order_list.pop()
+                                if profit >= 0:
+                                    _wallet.short_win += profit
+                                    _wallet.short_wcount += 1
+                                else:
+                                    _wallet.short_lose += profit
+                                    _wallet.short_lcount += 1
+                                
+                                _wallet.order_history.append(history_order)
+                                _wallet.wallet_update()
+                            amount = wallet.one_oder_money / price
+                            wallet.order_list.append(Order(self.symbol, amount, price, "Long", order_date = row[0]))
+
+                        _wallet.order_update(row[1], row[2], row[0])
+
+                buy_order = np.where(buy_signal == 1)
+                for b in buy_order[0]:
+                    wallet = wallet_list[b]
+                    if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
+                        wallet.order_list[0].close(price)
+                        profit = wallet.order_list[0].profit
+                        wallet.money += profit
+                        history_order = wallet.order_list.pop()
                         
-                #         if profit >= 0:
-                #             wallet.short_win += profit
-                #             wallet.short_wcount += 1
-                #         else:
-                #             wallet.short_lose += profit
-                #             wallet.short_lcount += 1
+                        if profit >= 0:
+                            wallet.short_win += profit
+                            wallet.short_wcount += 1
+                        else:
+                            wallet.short_lose += profit
+                            wallet.short_lcount += 1
                         
-                #         wallet.order_history.append(history_order)
-                #         wallet.wallet_update()
+                        wallet.order_history.append(history_order)
+                        wallet.wallet_update()
                     
-                #         # p_array[ind,4][b] = history_order.save_json()
-                #     amount = wallet.one_oder_money / price
-                #     wallet.order_list.append(Order(self.symbol, amount, price, "Long", order_date = row[0]))
-                # sell_order = np.where(sell_singal == 1)
-                # for s in sell_order[0]:
-                #     wallet = wallet_list[s]
-                #     if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
-                #         wallet.order_list[0].close(price)
-                #         profit = wallet.order_list[0].profit
-                #         wallet.money += profit
-                #         history_order = wallet.order_list.pop()
+                        # p_array[ind,4][b] = history_order.save_json()
+                    amount = wallet.one_oder_money / price
+                    wallet.order_list.append(Order(self.symbol, amount, price, "Long", order_date = row[0]))
+                sell_order = np.where(sell_signal == 1)
+                for s in sell_order[0]:
+                    wallet = wallet_list[s]
+                    if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
+                        wallet.order_list[0].close(price)
+                        profit = wallet.order_list[0].profit
+                        wallet.money += profit
+                        history_order = wallet.order_list.pop()
                         
-                #         if profit >= 0:
-                #             wallet.long_win += profit
-                #             wallet.long_wcount += 1
-                #         else:
-                #             wallet.long_lose += profit
-                #             wallet.long_lcount += 1
+                        if profit >= 0:
+                            wallet.long_win += profit
+                            wallet.long_wcount += 1
+                        else:
+                            wallet.long_lose += profit
+                            wallet.long_lcount += 1
                         
-                #         wallet.order_history.append(history_order)
-                #         wallet.wallet_update()
+                        wallet.order_history.append(history_order)
+                        wallet.wallet_update()
                     
-                #         # p_array[ind,4][s] = history_order.save_json()
-                #     amount = wallet.one_oder_money / price
-                #     wallet.order_list.append(Order(self.symbol, amount, price, "Short", order_date = row[0]))
+                        # p_array[ind,4][s] = history_order.save_json()
+                    amount = wallet.one_oder_money / price
+                    wallet.order_list.append(Order(self.symbol, amount, price, "Short", order_date = row[0]))
                 
-                # for w_ in wallet_list:
-                #     w_.order_update(row[1], row[2], row[0])
-                # buy_singal, sell_singal = np.zeros(t_.shape), np.zeros(t_.shape)
+                for w_ in wallet_list:
+                    w_.order_update(row[1], row[2], row[0])
+                buy_signal, sell_signal = np.zeros(t_.shape), np.zeros(t_.shape)
                 
                 
                 
@@ -613,7 +646,7 @@ class Cryptocurrency:
                     p_array[i,2] = np.zeros((factor_size,))
                     p_array[i,3] = np.zeros((factor_size,))
                     # p_array[i,4] = np.array(['']*factor_size)
-                buy_singal, sell_singal = np.zeros((factor_size,)), np.zeros((factor_size,))
+                buy_signal, sell_signal = np.zeros((factor_size,)), np.zeros((factor_size,))
                 wallet_list = np.array([Wallet() for i in range(factor_size)])
                 for ind, row in enumerate(new_n):
                     if ind >= period:
@@ -646,7 +679,7 @@ class Cryptocurrency:
                         
                         # price = float(row[3])
                         
-                        # buy_order = np.where(buy_singal == 1)
+                        # buy_order = np.where(buy_signal == 1)
                         # for b in buy_order[0]:
                         #     wallet = wallet_list[b]
                         #     if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
@@ -668,7 +701,7 @@ class Cryptocurrency:
                         #         # p_array[ind,4][b] = history_order.save_json()
                         #     amount = wallet.one_oder_money / price
                         #     wallet.order_list.append(Order(self.symbol, amount, price, "Long", order_date = row[0]))
-                        # sell_order = np.where(sell_singal == 1)
+                        # sell_order = np.where(sell_signal == 1)
                         # for s in sell_order[0]:
                         #     wallet = wallet_list[s]
                         #     if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
@@ -693,7 +726,7 @@ class Cryptocurrency:
                         
                         # for w_ in wallet_list:
                         #     w_.order_update(row[1], row[2], row[0])
-                        # buy_singal, sell_singal = np.zeros(t_.shape), np.zeros(t_.shape)
+                        # buy_signal, sell_signal = np.zeros(t_.shape), np.zeros(t_.shape)
                         
                         
                         
@@ -701,7 +734,7 @@ class Cryptocurrency:
                         
                         # buy_ = np.where(((p_array[ind-1,0]+p_array[ind,0]) == 0 )& (p_array[ind,0]==1))
                         # sell_ = np.where(((p_array[ind-1,0]+p_array[ind,0]) == 0 )& (p_array[ind,0]==-1))
-                        # buy_singal[buy_], sell_singal[sell_] = 1, 1
+                        # buy_signal[buy_], sell_signal[sell_] = 1, 1
                         
                         
                         
@@ -819,7 +852,7 @@ class Cryptocurrency:
                 for j in [3,6,9,12]:
                     p_array[i,j] = np.ones((factor_size,))
                     
-            buy_singal, sell_singal = np.zeros((factor_size,)), np.zeros((factor_size,))
+            buy_signal, sell_signal = np.zeros((factor_size,)), np.zeros((factor_size,))
             wallet_list = np.array([Wallet() for i in range(factor_size)])
             for ind, row in enumerate(new_n):
                 if ind >= period:
@@ -942,7 +975,7 @@ class Cryptocurrency:
             m = 1
             rsv_list = np.zeros(n[:,1].shape)
             trend = np.ones((rsv_list.shape[0],99)).astype(object)
-            buy_singal, sell_singal = np.zeros((99,)), np.zeros((99,))
+            buy_signal, sell_signal = np.zeros((99,)), np.zeros((99,))
             k_list = np.zeros((rsv_list.shape[0],99)).astype(object)
             d_list = np.zeros((rsv_list.shape[0],99)).astype(object)
             j_list = np.zeros((rsv_list.shape[0],99)).astype(object)
@@ -979,7 +1012,7 @@ class Cryptocurrency:
                 price = row[0]
                 
                 
-                buy_order = np.where(buy_singal == 1)
+                buy_order = np.where(buy_signal == 1)
                 for b in buy_order[0]:
                     wallet = wallet_list[b]
                     if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
@@ -1000,7 +1033,7 @@ class Cryptocurrency:
                     
                     amount = wallet.one_oder_money / price
                     wallet.order_list.append(Order(self.symbol, amount, price, "Long", order_date = self.db_k_lines[k_line_type]['OpenTime'].iloc[ind]))
-                sell_order = np.where(sell_singal == 1)
+                sell_order = np.where(sell_signal == 1)
                 for s in sell_order[0]:
                     wallet = wallet_list[s]
                     if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
@@ -1024,7 +1057,7 @@ class Cryptocurrency:
                 
                 for w_ in wallet_list:
                     w_.order_update(row[1], row[2], self.db_k_lines[k_line_type]['OpenTime'].iloc[ind])
-                buy_singal, sell_singal = np.zeros((99,)), np.zeros((99,))
+                buy_signal, sell_signal = np.zeros((99,)), np.zeros((99,))
                 
                 
                 
@@ -1036,7 +1069,7 @@ class Cryptocurrency:
                 
                 buy_ = np.where(((trend[ind-1,:]+trend[ind,:]) == 0 )& (trend[ind,:]==1))
                 sell_ = np.where(((trend[ind-1,:]+trend[ind,:]) == 0 )& (trend[ind,:]==-1))
-                buy_singal[buy_], sell_singal[sell_] = 1, 1
+                buy_signal[buy_], sell_signal[sell_] = 1, 1
                 
                 
             
@@ -1193,11 +1226,11 @@ def kdj_one(df, ilong = 41, isig = 31):
     pj = 3*pk-2*pd
     
     trend = np.ones(pj.shape)
-    buy_singal, sell_singal = 0, 0
+    buy_signal, sell_signal = 0, 0
     wallet = Wallet()
     for ind in range(1,len(pj)):
         price = n[ind,0]
-        if buy_singal == 1:
+        if buy_signal == 1:
             if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
                 wallet.order_list[0].close(price)
                 profit = wallet.order_list[0].profit
@@ -1215,9 +1248,9 @@ def kdj_one(df, ilong = 41, isig = 31):
             
             amount = wallet.one_oder_money / price
             wallet.order_list.append(Order('errortest', amount, price, 'Long'))
-            buy_singal = 0
+            buy_signal = 0
             
-        elif sell_singal == 1:
+        elif sell_signal == 1:
             if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
                 wallet.order_list[0].close(price)
                 profit = wallet.order_list[0].profit
@@ -1235,7 +1268,7 @@ def kdj_one(df, ilong = 41, isig = 31):
                 
             amount = wallet.one_oder_money / price
             wallet.order_list.append(Order('errortest', amount, price, "Short"))
-            sell_singal = 0
+            sell_signal = 0
             
         if pj[ind] >pd[ind]:
             trend[ind] = 1
@@ -1245,9 +1278,9 @@ def kdj_one(df, ilong = 41, isig = 31):
             trend[ind] == trend[ind-1]
         if trend[ind-1] + trend[ind] == 0:
             if trend[ind] == 1:
-                buy_singal = 1
+                buy_signal = 1
             else:
-                sell_singal = 1
+                sell_signal = 1
     
     return wallet
     
@@ -1275,7 +1308,7 @@ def kdj_all(df):
         m = 1
         rsv_list = np.zeros(n[:,1].shape)
         trend = np.ones((rsv_list.shape[0],99)).astype(object)
-        buy_singal, sell_singal = np.zeros((99,)), np.zeros((99,))
+        buy_signal, sell_signal = np.zeros((99,)), np.zeros((99,))
         k_list = np.zeros((rsv_list.shape[0],99)).astype(object)
         d_list = np.zeros((rsv_list.shape[0],99)).astype(object)
         j_list = np.zeros((rsv_list.shape[0],99)).astype(object)
@@ -1312,7 +1345,7 @@ def kdj_all(df):
             price = row[0]
             
             
-            buy_order = np.where(buy_singal == 1)
+            buy_order = np.where(buy_signal == 1)
             for b in buy_order[0]:
                 wallet = wallet_list[b]
                 if wallet.order_list != [] and wallet.order_list[0].type == 'Short':
@@ -1332,7 +1365,7 @@ def kdj_all(df):
                     wallet.wallet_update()
                 amount = wallet.one_oder_money / price
                 wallet.order_list.append(Order('errortest', amount, price, "Long", order_date = df['OpenTime'].iloc[ind]))
-            sell_order = np.where(sell_singal == 1)
+            sell_order = np.where(sell_signal == 1)
             for s in sell_order[0]:
                 wallet = wallet_list[s]
                 if wallet.order_list != [] and wallet.order_list[0].type == 'Long':
@@ -1353,7 +1386,7 @@ def kdj_all(df):
                 amount = wallet.one_oder_money / price
                 wallet.order_list.append(Order('errortest', amount, price, "Short", order_date = df['OpenTime'].iloc[ind]))
             
-            buy_singal, sell_singal = np.zeros((99,)), np.zeros((99,))
+            buy_signal, sell_signal = np.zeros((99,)), np.zeros((99,))
             
             
             
@@ -1365,7 +1398,7 @@ def kdj_all(df):
             
             buy_ = np.where(((trend[ind-1,:]+trend[ind,:]) == 0 )& (trend[ind,:]==1))
             sell_ = np.where(((trend[ind-1,:]+trend[ind,:]) == 0 )& (trend[ind,:]==-1))
-            buy_singal[buy_], sell_singal[sell_] = 1, 1
+            buy_signal[buy_], sell_signal[sell_] = 1, 1
             
             
         
